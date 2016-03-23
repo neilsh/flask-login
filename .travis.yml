@@ -7,3 +7,4 @@ install:
   - python install_requirements.py dev
   - pip install . --use-mirrors
 script: make check
+after_success: coveralls
