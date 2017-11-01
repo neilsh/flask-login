@@ -31,6 +31,10 @@ from flask_login import (LoginManager, UserMixin, AnonymousUserMixin,
                          login_fresh, login_required, session_protected,
                          fresh_login_required, confirm_login, encode_cookie,
                          decode_cookie, set_login_view, user_accessed)
+from flask_login.__about__ import (__title__, __description__, __url__,
+                                   __version_info__, __version__, __author__,
+                                   __author_email__, __maintainer__,
+                                   __license__, __copyright__)
 from flask_login.utils import _secret_key, _user_context_processor
 
 
@@ -110,6 +114,22 @@ creeper = User(u'Creeper', 3, False)
 germanjapanese = User(u'Müller', u'佐藤')  # Unicode user_id
 
 USERS = {1: notch, 2: steve, 3: creeper, u'佐藤': germanjapanese}
+
+
+class AboutTestCase(unittest.TestCase):
+    """Make sure we can get version and other info."""
+
+    def test_have_about_data(self):
+        self.assertTrue(__title__ is not None)
+        self.assertTrue(__description__ is not None)
+        self.assertTrue(__url__ is not None)
+        self.assertTrue(__version_info__ is not None)
+        self.assertTrue(__version__ is not None)
+        self.assertTrue(__author__ is not None)
+        self.assertTrue(__author_email__ is not None)
+        self.assertTrue(__maintainer__ is not None)
+        self.assertTrue(__license__ is not None)
+        self.assertTrue(__copyright__ is not None)
 
 
 class StaticTestCase(unittest.TestCase):
@@ -475,6 +495,21 @@ class LoginTestCase(unittest.TestCase):
             self.assertEqual(result.location,
                              'http://localhost/login?next=%2Fsecret')
 
+    def test_unauthorized_with_next_in_session(self):
+        self.login_manager.login_view = 'login'
+        self.app.config['USE_SESSION_FOR_NEXT'] = True
+
+        @self.app.route('/login')
+        def login():
+            return session.pop('next', '')
+
+        with self.app.test_client() as c:
+            result = c.get('/secret')
+            self.assertEqual(result.status_code, 302)
+            self.assertEqual(result.location,
+                             'http://localhost/login')
+            self.assertEqual(c.get('/login').data.decode('utf-8'), '/secret')
+
     def test_unauthorized_uses_blueprint_login_view(self):
         with self.app.app_context():
 
@@ -789,6 +824,22 @@ class LoginTestCase(unittest.TestCase):
             self.assertEqual(result.status_code, 302)
             expected = 'http://localhost/refresh-view?next=%2Fneeds-refresh'
             self.assertEqual(result.location, expected)
+
+    def test_refresh_with_next_in_session(self):
+        @self.app.route('/refresh-view')
+        def refresh_view():
+            return session.pop('next', '')
+
+        self.login_manager.refresh_view = 'refresh_view'
+        self.app.config['USE_SESSION_FOR_NEXT'] = True
+
+        with self.app.test_client() as c:
+            c.get('/login-notch-remember')
+            result = c.get('/needs-refresh')
+            self.assertEqual(result.status_code, 302)
+            self.assertEqual(result.location, 'http://localhost/refresh-view')
+            result = c.get('/refresh-view')
+            self.assertEqual(result.data.decode('utf-8'), '/needs-refresh')
 
     def test_confirm_login(self):
         with self.app.test_client() as c:

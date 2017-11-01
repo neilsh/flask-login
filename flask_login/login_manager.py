@@ -16,13 +16,14 @@ from ._compat import text_type
 from .config import (COOKIE_NAME, COOKIE_DURATION, COOKIE_SECURE,
                      COOKIE_HTTPONLY, LOGIN_MESSAGE, LOGIN_MESSAGE_CATEGORY,
                      REFRESH_MESSAGE, REFRESH_MESSAGE_CATEGORY, ID_ATTRIBUTE,
-                     AUTH_HEADER_NAME, SESSION_KEYS)
+                     AUTH_HEADER_NAME, SESSION_KEYS, USE_SESSION_FOR_NEXT)
 from .mixins import AnonymousUserMixin
 from .signals import (user_loaded_from_cookie, user_loaded_from_header,
                       user_loaded_from_request, user_unauthorized,
                       user_needs_refresh, user_accessed, session_protected)
-from .utils import (_get_user, login_url, _create_identifier,
-                    _user_context_processor, encode_cookie, decode_cookie)
+from .utils import (_get_user, login_url as make_login_url, _create_identifier,
+                    _user_context_processor, encode_cookie, decode_cookie,
+                    make_next_param, expand_login_view)
 
 
 class LoginManager(object):
@@ -86,6 +87,8 @@ class LoginManager(object):
 
         self.request_callback = None
 
+        self._session_identifier_generator = _create_identifier
+
         if app is not None:
             self.init_app(app, add_context_processor)
 
@@ -130,10 +133,12 @@ class LoginManager(object):
               the current blueprint using `blueprint_login_views`. If the app
               is not using blueprints or the login view for the current
               blueprint is not specified use the value of `login_view`.
-              Redirect the user to the login view. (The page they were
+
+            - Redirect the user to the login view. (The page they were
               attempting to access will be passed in the ``next`` query
               string variable, so you can redirect there if present instead
-              of the homepage.)
+              of the homepage. Alternatively, it will be added to the session
+              as ``next`` if USE_SESSION_FOR_NEXT is set.)
 
         If :attr:`LoginManager.login_view` is not defined, then it will simply
         raise a HTTP 401 (Unauthorized) error instead.
@@ -161,7 +166,15 @@ class LoginManager(object):
             else:
                 flash(self.login_message, category=self.login_message_category)
 
-        return redirect(login_url(login_view, request.url))
+        config = current_app.config
+        if config.get('USE_SESSION_FOR_NEXT', USE_SESSION_FOR_NEXT):
+            login_url = expand_login_view(login_view)
+            session['next'] = make_next_param(login_url, request.url)
+            redirect_url = make_login_url(login_view)
+        else:
+            redirect_url = make_login_url(login_view, next_url=request.url)
+
+        return redirect(redirect_url)
 
     def user_loader(self, callback):
         '''
@@ -177,6 +190,9 @@ class LoginManager(object):
 
     def header_loader(self, callback):
         '''
+        This function has been deprecated. Please use
+        :meth:`LoginManager.request_loader` instead.
+
         This sets the callback for loading a user from a header value.
         The function you set should take an authentication token and
         return a user object, or `None` if the user does not exist.
@@ -260,7 +276,16 @@ class LoginManager(object):
             flash(self.needs_refresh_message,
                   category=self.needs_refresh_message_category)
 
-        return redirect(login_url(self.refresh_view, request.url))
+        config = current_app.config
+        if config.get('USE_SESSION_FOR_NEXT', USE_SESSION_FOR_NEXT):
+            login_url = expand_login_view(self.refresh_view)
+            session['next'] = make_next_param(login_url, request.url)
+            redirect_url = make_login_url(self.refresh_view)
+        else:
+            login_url = self.refresh_view
+            redirect_url = make_login_url(login_url, next_url=request.url)
+
+        return redirect(redirect_url)
 
     def reload_user(self, user=None):
         ctx = _request_ctx_stack.top
@@ -317,7 +342,7 @@ class LoginManager(object):
 
     def _session_protection(self):
         sess = session._get_current_object()
-        ident = _create_identifier()
+        ident = self._session_identifier_generator()
 
         app = current_app._get_current_object()
         mode = app.config.get('SESSION_PROTECTION', self.session_protection)

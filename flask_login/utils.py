@@ -75,6 +75,20 @@ def make_next_param(login_url, current_url):
     return current_url
 
 
+def expand_login_view(login_view):
+    '''
+    Returns the url for the login view, expanding the view name to a url if
+    needed.
+
+    :param login_view: The name of the login view or a URL for the login view.
+    :type login_view: str
+    '''
+    if login_view.startswith(('https://', 'http://', '/')):
+        return login_view
+    else:
+        return url_for(login_view)
+
+
 def login_url(login_view, next_url=None, next_field='next'):
     '''
     Creates a URL for redirecting to a login page. If only `login_view` is
@@ -91,19 +105,16 @@ def login_url(login_view, next_url=None, next_field='next'):
                        ``next``.)
     :type next_field: str
     '''
-    if login_view.startswith(('https://', 'http://', '/')):
-        base = login_view
-    else:
-        base = url_for(login_view)
+    base = expand_login_view(login_view)
 
     if next_url is None:
         return base
 
-    parts = list(urlparse(base))
-    md = url_decode(parts[4])
+    parsed_result = urlparse(base)
+    md = url_decode(parsed_result.query)
     md[next_field] = make_next_param(base, next_url)
-    parts[4] = url_encode(md, sort=True)
-    return urlunparse(parts)
+    parsed_result = parsed_result._replace(query=url_encode(md, sort=True))
+    return urlunparse(parsed_result)
 
 
 def login_fresh():
@@ -140,7 +151,7 @@ def login_user(user, remember=False, force=False, fresh=True):
     user_id = getattr(user, current_app.login_manager.id_attribute)()
     session['user_id'] = user_id
     session['_fresh'] = fresh
-    session['_id'] = _create_identifier()
+    session['_id'] = current_app.login_manager._session_identifier_generator()
 
     if remember:
         session['remember'] = 'set'
@@ -180,7 +191,7 @@ def confirm_login():
     are reloaded from a cookie.
     '''
     session['_fresh'] = True
-    session['_id'] = _create_identifier()
+    session['_id'] = current_app.login_manager._session_identifier_generator()
     user_login_confirmed.send(current_app._get_current_object())
 
 
